@@ -1,0 +1,589 @@
+PROJECT EXPORT
+================================================================================
+Project Root: C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya
+Total Files: 9
+================================================================================
+
+PROJECT TREE
+================================================================================
+garden_manager_purichaya/
+    .gitignore
+    app.py
+    data/
+        README.txt
+    database.py
+    export_project.py
+    README.md
+    requirements.txt
+    tests/
+        test_utils.py
+    utils.py
+
+
+FILE CONTENTS
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\.gitignore
+--------------------------------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+data/*.db
+.env
+.DS_Store
+*SETUP/
+.gitignore
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\app.py
+--------------------------------------------------------------------------------
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
+from database import init_db, add_harvest, get_harvests, delete_harvest
+from utils import calculate_revenue, calculate_profit
+
+st.set_page_config(
+    page_title="Garden Manager of Purichaya garden",
+    page_icon="🌱",
+    layout="wide",
+)
+
+init_db()
+
+st.title("Garden Manager of Purichaya garden")
+st.caption("ระบบจัดการผลผลิตในสวนภูริชญา")
+
+page = st.sidebar.radio(
+    "เมนูหลัก",
+    ["ภาพรวม", "บันทึกผลผลิต", "ประวัติผลผลิต"],
+)
+
+records = get_harvests()
+df = pd.DataFrame(records)
+
+if page == "ภาพรวม":
+    st.header("ภาพรวมผลผลิต")
+
+    if df.empty:
+        st.info("ยังไม่มีข้อมูลผลผลิต กรุณาไปที่เมนู 'บันทึกผลผลิต' เพื่อเพิ่มข้อมูล")
+    else:
+        total_items = len(df)
+        total_quantity = float(df["quantity"].sum())
+        total_revenue = float(df["revenue"].sum())
+        total_cost = float(df["cost"].sum())
+        total_profit = total_revenue - total_cost
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("จำนวนรายการ", f"{total_items:,}")
+        c2.metric("ผลผลิตรวม", f"{total_quantity:,.2f}")
+        c3.metric("รายรับรวม", f"{total_revenue:,.2f} บาท")
+        c4.metric("กำไรเบื้องต้น", f"{total_profit:,.2f} บาท")
+
+        st.subheader("รายรับแยกตามชนิดพืช")
+        chart_data = df.groupby("crop", as_index=False)["revenue"].sum()
+        fig = px.bar(
+            chart_data,
+            x="crop",
+            y="revenue",
+            labels={"crop": "ชนิดพืช", "revenue": "รายรับ (บาท)"},
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.subheader("รายการล่าสุด")
+        st.dataframe(
+            df.sort_values("harvest_date", ascending=False).head(10),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+elif page == "บันทึกผลผลิต":
+    st.header("บันทึกผลผลิต")
+    st.write("กรอกข้อมูลตามรายการจริงของสวน")
+
+    with st.form("harvest_form", clear_on_submit=True):
+        crop = st.text_input("ชื่อพืช / ผลผลิต")
+        harvest_date = st.date_input("วันที่เก็บเกี่ยว")
+        quantity = st.number_input("ปริมาณผลผลิต", min_value=0.0, value=0.0, step=0.5)
+        unit = st.selectbox("หน่วย", ["กิโลกรัม", "กรัม", "ผล", "มัด", "ถุง", "ลัง", "อื่น ๆ"])
+        price_per_unit = st.number_input("ราคาขายต่อหน่วย (บาท)", min_value=0.0, value=0.0, step=1.0)
+        cost = st.number_input("ต้นทุนของรายการนี้ (บาท)", min_value=0.0, value=0.0, step=1.0)
+        note = st.text_area("หมายเหตุ (ถ้ามี)")
+
+        submitted = st.form_submit_button("บันทึกข้อมูล", type="primary")
+
+        if submitted:
+            if not crop.strip():
+                st.error("กรุณากรอกชื่อพืชหรือผลผลิต")
+            elif quantity <= 0:
+                st.error("ปริมาณผลผลิตต้องมากกว่า 0")
+            else:
+                revenue = calculate_revenue(quantity, price_per_unit)
+                add_harvest(
+                    crop=crop.strip(),
+                    harvest_date=harvest_date.isoformat(),
+                    quantity=quantity,
+                    unit=unit,
+                    price_per_unit=price_per_unit,
+                    cost=cost,
+                    revenue=revenue,
+                    note=note.strip(),
+                )
+                st.success(f"บันทึกข้อมูล '{crop.strip()}' เรียบร้อยแล้ว")
+                st.rerun()
+
+elif page == "ประวัติผลผลิต":
+    st.header("ประวัติผลผลิต")
+    if df.empty:
+        st.info("ยังไม่มีข้อมูลให้แสดง")
+    else:
+        search = st.text_input("ค้นหาตามชื่อพืช")
+        filtered = df[df["crop"].str.contains(search, case=False, na=False)] if search else df
+
+        display_df = filtered.rename(
+            columns={
+                "id": "รหัส",
+                "crop": "ผลผลิต",
+                "harvest_date": "วันที่เก็บเกี่ยว",
+                "quantity": "ปริมาณ",
+                "unit": "หน่วย",
+                "price_per_unit": "ราคาต่อหน่วย (บาท)",
+                "cost": "ต้นทุน (บาท)",
+                "revenue": "รายรับ (บาท)",
+                "note": "หมายเหตุ",
+            }
+        )
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        st.subheader("ลบรายการ")
+        options = {
+            f"รหัส {row.id} — {row.crop} ({row.harvest_date})": int(row.id)
+            for row in filtered.itertuples()
+        }
+        if options:
+            selected_label = st.selectbox("เลือกรายการที่ต้องการลบ", list(options.keys()))
+            confirm = st.checkbox("ยืนยันว่าต้องการลบรายการนี้")
+            if st.button("ลบรายการ", disabled=not confirm):
+                delete_harvest(options[selected_label])
+                st.success("ลบรายการแล้ว")
+                st.rerun()
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\data\README.txt
+--------------------------------------------------------------------------------
+ไฟล์ฐานข้อมูล garden.db จะถูกสร้างอัตโนมัติเมื่อเปิดแอปครั้งแรก
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\database.py
+--------------------------------------------------------------------------------
+import sqlite3
+from pathlib import Path
+
+DB_PATH = Path(__file__).parent / "data" / "garden.db"
+
+
+def get_connection():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_db():
+    with get_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS harvests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                crop TEXT NOT NULL,
+                harvest_date TEXT NOT NULL,
+                quantity REAL NOT NULL CHECK(quantity > 0),
+                unit TEXT NOT NULL,
+                price_per_unit REAL NOT NULL CHECK(price_per_unit >= 0),
+                cost REAL NOT NULL CHECK(cost >= 0),
+                revenue REAL NOT NULL CHECK(revenue >= 0),
+                note TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+
+
+def add_harvest(crop, harvest_date, quantity, unit, price_per_unit, cost, revenue, note=""):
+    with get_connection() as connection:
+        connection.execute(
+            """
+            INSERT INTO harvests
+            (crop, harvest_date, quantity, unit, price_per_unit, cost, revenue, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (crop, harvest_date, quantity, unit, price_per_unit, cost, revenue, note),
+        )
+
+
+def get_harvests():
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, crop, harvest_date, quantity, unit,
+                   price_per_unit, cost, revenue, note
+            FROM harvests
+            ORDER BY harvest_date DESC, id DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_harvest(harvest_id):
+    with get_connection() as connection:
+        connection.execute("DELETE FROM harvests WHERE id = ?", (harvest_id,))
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\export_project.py
+--------------------------------------------------------------------------------
+
+import os
+from pathlib import Path
+
+# ==================================================
+# CONFIGURATION
+# ==================================================
+
+# Root Folder ของ Project (ตำแหน่งที่วาง Script นี้)
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+# ไฟล์ผลลัพธ์
+OUTPUT_FILE = PROJECT_ROOT / "Project_Export.txt"
+
+# Folder ที่ต้องการยกเว้น (ไม่รวม Subfolder ภายในด้วย)
+EXCLUDED_DIRS = {
+    "SETUP",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    ".idea",
+    ".vscode",
+}
+
+# นามสกุลไฟล์ที่ต้องการ Export
+# เพิ่มหรือลบรายการได้ตามต้องการ
+ALLOWED_EXTENSIONS = {
+    ".py",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".json",
+    ".sql",
+    ".md",
+    ".txt",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".bat",
+    ".ps1",
+    ".sh",
+    ".env.example",
+    ".gitignore",
+    ".dockerignore",
+    ".xml",
+    ".csv",
+    ".ipynb",
+}
+
+# จำกัดขนาดไฟล์ข้อความต่อไฟล์ (10 MB)
+MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+# ==================================================
+# HELPER FUNCTIONS
+# ==================================================
+
+def is_excluded_dir(dirname: str) -> bool:
+    """ตรวจสอบ Folder ที่ไม่ต้องการ Export"""
+    excluded = {name.lower() for name in EXCLUDED_DIRS}
+    return dirname.lower() in excluded
+
+
+def is_allowed_file(file_path: Path) -> bool:
+    """ตรวจสอบนามสกุลไฟล์ที่อนุญาต"""
+    name = file_path.name.lower()
+
+    # รองรับชื่อไฟล์พิเศษ เช่น .gitignore
+    special_names = {
+        ".gitignore",
+        ".dockerignore",
+        ".env.example",
+    }
+
+    if name in special_names:
+        return True
+
+    return file_path.suffix.lower() in ALLOWED_EXTENSIONS
+
+
+def is_binary_file(file_path: Path) -> bool:
+    """ตรวจสอบไฟล์ Binary จากข้อมูลภายในไฟล์"""
+    try:
+        with file_path.open("rb") as file:
+            sample = file.read(8192)
+
+        return b"\0" in sample
+
+    except OSError:
+        return True
+
+
+def collect_files():
+    """รวบรวมไฟล์ที่ตรงเงื่อนไขทั้งหมด"""
+
+    collected = []
+
+    for current_root, dirs, files in os.walk(PROJECT_ROOT):
+        # ยกเว้น Folder ที่กำหนด
+        dirs[:] = sorted(
+            dirname
+            for dirname in dirs
+            if not is_excluded_dir(dirname)
+        )
+
+        for filename in sorted(files):
+            file_path = Path(current_root) / filename
+
+            # ไม่รวมไฟล์ Export ตัวเอง
+            if file_path.resolve() == OUTPUT_FILE.resolve():
+                continue
+
+            # ตรวจสอบนามสกุลไฟล์
+            if not is_allowed_file(file_path):
+                continue
+
+            collected.append(file_path)
+
+    return sorted(
+        collected,
+        key=lambda path: str(path.relative_to(PROJECT_ROOT)).lower()
+    )
+
+
+# ==================================================
+# EXPORT PROJECT
+# ==================================================
+
+def export_project():
+    files = collect_files()
+
+    with OUTPUT_FILE.open(
+        "w",
+        encoding="utf-8",
+        newline="\n"
+    ) as output:
+
+        # ------------------------------------------
+        # PROJECT INFORMATION
+        # ------------------------------------------
+
+        output.write("PROJECT EXPORT\n")
+        output.write("=" * 80 + "\n")
+        output.write(f"Project Root: {PROJECT_ROOT}\n")
+        output.write(f"Total Files: {len(files)}\n")
+        output.write("=" * 80 + "\n\n")
+
+        # ------------------------------------------
+        # PROJECT TREE
+        # ------------------------------------------
+
+        output.write("PROJECT TREE\n")
+        output.write("=" * 80 + "\n")
+
+        output.write(f"{PROJECT_ROOT.name}/\n")
+
+        tree = {}
+
+        for file_path in files:
+            relative_path = file_path.relative_to(PROJECT_ROOT)
+            parts = relative_path.parts
+
+            current = tree
+
+            for part in parts:
+                current = current.setdefault(part, {})
+
+        def write_tree(node, depth=1):
+            for name in sorted(node, key=str.lower):
+                is_directory = bool(node[name])
+
+                if is_directory:
+                    output.write(
+                        "    " * depth + name + "/\n"
+                    )
+                    write_tree(node[name], depth + 1)
+                else:
+                    output.write(
+                        "    " * depth + name + "\n"
+                    )
+
+        write_tree(tree)
+
+        # ------------------------------------------
+        # FILE CONTENTS
+        # ------------------------------------------
+
+        output.write("\n\n")
+        output.write("FILE CONTENTS\n")
+        output.write("=" * 80 + "\n\n")
+
+        for file_path in files:
+            output.write("#" + str(file_path.resolve()) + "\n")
+            output.write("-" * 80 + "\n")
+
+            try:
+                # จำกัดขนาดไฟล์เพื่อป้องกันไฟล์ใหญ่เกินไป
+                file_size = file_path.stat().st_size
+
+                if file_size > MAX_FILE_SIZE:
+                    output.write(
+                        f"[Skipped: file exceeds "
+                        f"{MAX_FILE_SIZE // (1024 * 1024)} MB]\n"
+                    )
+                    output.write("\n" + "=" * 80 + "\n\n")
+                    continue
+
+                if is_binary_file(file_path):
+                    output.write("[Binary file skipped]\n")
+                else:
+                    # อ่าน UTF-8 ก่อน แล้วลอง Windows encoding
+                    try:
+                        content = file_path.read_text(
+                            encoding="utf-8-sig"
+                        )
+                    except UnicodeDecodeError:
+                        content = file_path.read_text(
+                            encoding="cp1252"
+                        )
+
+                    output.write(content)
+
+                    if content and not content.endswith("\n"):
+                        output.write("\n")
+
+            except (OSError, UnicodeError) as error:
+                output.write(
+                    f"[File read error: {error}]\n"
+                )
+
+            output.write("\n")
+            output.write("=" * 80 + "\n\n")
+
+    print("Export completed successfully!")
+    print(f"Project Root : {PROJECT_ROOT}")
+    print(f"Total Files  : {len(files)}")
+    print(f"Output File  : {OUTPUT_FILE}")
+
+
+# ==================================================
+# MAIN
+# ==================================================
+
+if __name__ == "__main__":
+    export_project()
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\README.md
+--------------------------------------------------------------------------------
+# Garden Manager of Purichaya garden
+
+เว็บแอปสำหรับบันทึกและสรุปข้อมูลผลผลิตทางการเกษตร สร้างด้วย Python, Streamlit, SQLite, Pandas และ Plotly
+
+## ความสามารถในเวอร์ชันเริ่มต้น
+- บันทึกข้อมูลผลผลิต วันที่ ปริมาณ หน่วย ราคาขาย และต้นทุน
+- คำนวณรายรับเบื้องต้นจากปริมาณ × ราคาต่อหน่วย
+- ดูประวัติและค้นหารายการผลผลิต
+- ลบรายการที่บันทึกไว้
+- แสดงตัวเลขสรุปและกราฟรายรับแยกตามชนิดพืช
+
+## วิธีติดตั้งและเปิดเว็บ
+
+ต้องติดตั้ง Python 3.11 ขึ้นไปก่อน จากนั้นเปิด Terminal ในโฟลเดอร์โปรเจกต์
+
+```bash
+python -m venv .venv
+```
+
+Windows:
+```bash
+.venv\\Scripts\\activate
+```
+
+ติดตั้งไลบรารี:
+```bash
+pip install -r requirements.txt
+```
+
+เปิดเว็บ:
+```bash
+streamlit run app.py
+```
+
+เว็บจะเปิดในเบราว์เซอร์ โดยทั่วไปใช้ที่อยู่ `http://localhost:8501`
+
+## ฐานข้อมูล
+ข้อมูลจะถูกบันทึกไว้ที่ `data/garden.db` และสร้างตารางให้อัตโนมัติเมื่อเปิดแอปครั้งแรก
+
+## ข้อควรตรวจสอบก่อนใช้จริง
+- กำหนดหน่วยและวิธีบันทึกต้นทุนให้ตรงกับการทำงานของสวน
+- ตรวจสอบว่าต้นทุนเป็นต้นทุนต่อรายการ ต่อรอบเก็บเกี่ยว หรือรูปแบบอื่น
+- สำรองไฟล์ `data/garden.db` เป็นประจำ
+- ก่อนนำไปใช้จริง ควรทดสอบการกรอกข้อมูลผิดพลาดและการคำนวณกับข้อมูลที่ตรวจสอบแล้ว
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\requirements.txt
+--------------------------------------------------------------------------------
+streamlit>=1.40
+pandas>=2.0
+plotly>=5.20
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\tests\test_utils.py
+--------------------------------------------------------------------------------
+from utils import calculate_revenue, calculate_profit
+
+
+def test_calculate_revenue():
+    assert calculate_revenue(2, 15) == 30
+
+
+def test_calculate_profit():
+    assert calculate_profit(30, 10) == 20
+
+================================================================================
+
+#C:\Users\phakh\Downloads\VSC.jpg (BETA)\garden_manager_purichaya\utils.py
+--------------------------------------------------------------------------------
+def calculate_revenue(quantity: float, price_per_unit: float) -> float:
+    """คำนวณรายรับจากปริมาณคูณราคาต่อหน่วย"""
+    return round(quantity * price_per_unit, 2)
+
+
+def calculate_profit(revenue: float, cost: float) -> float:
+    """คำนวณกำไรเบื้องต้นจากรายรับหักต้นทุน"""
+    return round(revenue - cost, 2)
+
+================================================================================
+
